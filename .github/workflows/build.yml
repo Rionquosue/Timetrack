@@ -1,0 +1,111 @@
+name: Test and package
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, windows-2022]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Unit tests
+        run: python -m unittest discover -s tests -v
+      - name: Install virtual display (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y xvfb python3-tk
+      - name: Source UI smoke test (Linux)
+        if: runner.os == 'Linux'
+        run: xvfb-run -a python main.py --smoke-test
+      - name: Source UI smoke test (Windows)
+        if: runner.os == 'Windows'
+        run: python main.py --smoke-test
+
+  package:
+    name: Package (${{ matrix.os }})
+    needs: test
+    if: github.event_name != 'pull_request'
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, windows-2022]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: requirements-build.txt
+      - name: Install build dependencies
+        run: python -m pip install -r requirements-build.txt
+      - name: Install virtual display (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y xvfb python3-tk
+      - name: Build, smoke-test and package (Linux)
+        if: runner.os == 'Linux'
+        run: xvfb-run -a python scripts/package.py
+      - name: Build, smoke-test and package (Windows)
+        if: runner.os == 'Windows'
+        run: python scripts/package.py
+      - name: Upload portable package and checksum
+        uses: actions/upload-artifact@v4
+        with:
+          name: Timetrack-${{ runner.os }}-x86_64
+          path: release/*
+          if-no-files-found: error
+          retention-days: 30
+
+  release:
+    name: Publish release
+    needs: [test, package]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: release
+          merge-multiple: true
+      - name: Verify tag matches VERSION
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: test "$RELEASE_TAG" = "v$(tr -d '\r\n' < VERSION)"
+      - name: Verify checksums
+        working-directory: release
+        run: sha256sum -c *.sha256
+      - name: Publish packaged applications
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          gh release create "$RELEASE_TAG" release/* --verify-tag --title "Timetrack $RELEASE_TAG" --generate-notes
+      - name: Check status of GitHub jobs and release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/jobs" > jobs.json
+          jq -e '[.jobs[] | select(.name | test("^(Test|Package) "))] | length == 4 and all(.[]; .conclusion == "success")' jobs.json
+          gh release view "$RELEASE_TAG" --json isDraft,assets > release.json
+          jq -e '.isDraft == false and (.assets | length == 4) and all(.assets[]; .size > 0)' release.json
