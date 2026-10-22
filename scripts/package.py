@@ -42,7 +42,7 @@ def main():
     if system == 'Windows':
         # Ensure double-click launches have a predictable writable working directory.
         (folder / 'Start-Timetrack.cmd').write_text(
-            '@echo off\r\ncd /d "%~dp0"\r\nstart "" "%~dp0Timetrack.exe"\r\n')
+            '@echo off\r\ncd /d "%~dp0"\r\nstart "" "%~dp0Timetrack.exe"\r\n', newline='')
         executable = folder / 'Timetrack.exe'
     else:
         launcher = folder / 'start-timetrack.sh'
@@ -60,7 +60,7 @@ def main():
                     'zip' if system == 'Windows' else 'gztar',
                     root_dir=ROOT / 'dist', base_dir='Timetrack'))
     digest = hashlib.sha256(archive.read_bytes()).hexdigest()
-    archive.with_name(archive.name + '.sha256').write_text(f'{digest}  {archive.name}\n')
+    archive.with_name(archive.name + '.sha256').write_bytes(f'{digest}  {archive.name}\n'.encode('utf-8'))
     print(archive)
 
 
