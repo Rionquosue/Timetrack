@@ -64,7 +64,7 @@ git tag v0.1.0
 git push origin v0.1.0
 ```
 
-Only tag builds publish a release. Test and package jobs must succeed first. The release job verifies checksums, publishes both packages, and checks the job results and all four uploaded assets. Ordinary builds remain Actions artifacts.
+Tag builds publish a release. Alternatively, push a commit to `main` whose complete message is `release: v0.1.0` (matching `VERSION`); the workflow creates that tag at the tested commit and publishes the same assets. Test and package jobs must succeed first. The release job verifies checksums, publishes both packages, and checks the job results and all four uploaded assets. Ordinary builds remain Actions artifacts.
 
 ## Project layout
 
